@@ -1,40 +1,58 @@
-# app.py
-from flask import Flask, request, jsonify
+from flask import Flask, request, send_file
 from flask_cors import CORS
 import os
+import pickle
+import logging
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+CORS(app, resources={r"/*": {"origins": "http://localhost:5173"}}, supports_credentials=True)
 
-# Define the processing function
-def process_files(video_path, subtitle_path):
-    # Import your model here and call the processing function
-    # For example, assume you have a function `run_model(video_path, subtitle_path)`
+logging.basicConfig(level=logging.DEBUG)
 
-    # Dummy implementation for processing
-    # In a real scenario, you would call your model and return the output
-    output_file_path = f"output/{os.path.basename(video_path)}_processed.mp4"
-    
-    # Simulate processing
-    print(f"Processing video: {video_path} with subtitles: {subtitle_path}")
-    # Here you would integrate your model processing logic
+# Path where the processed subtitle will be saved temporarily
+OUTPUT_PATH = os.path.expanduser("~/Downloads/adjusted_subtitles.srt")
 
-    return output_file_path
+# Load your .pkl file (from Downloads folder)
+PKL_PATH = os.path.expanduser("~/Downloads/audio_segments_output (1).pkl")
+with open(PKL_PATH, 'rb') as f:
+    model = pickle.load(f)
 
-@app.route('/process-files', methods=['POST'])
-def process_files_endpoint():
-    data = request.json
-    video_file_path = data.get('videoFilePath')
-    subtitle_file_path = data.get('subtitleFilePath')
+@app.route('/process', methods=['POST', 'OPTIONS'])
+def process_files():
+    if request.method == 'OPTIONS':
+        # Handling preflight request
+        response = app.make_default_options_response()
+        response.headers.add('Access-Control-Allow-Methods', 'POST')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        return response
 
-    try:
-        output_file = process_files(video_file_path, subtitle_file_path)
-        return jsonify({"message": "Processing complete", "outputFilePath": output_file}), 200
-    except Exception as e:
-        print(e)
-        return jsonify({"message": "Processing failed", "error": str(e)}), 500
+    logging.debug(f"Received request: {request.files}")
+    if 'video' not in request.files or 'subtitle' not in request.files:
+        return {"error": "Both video and subtitle files are required"}, 400
+
+    video_file = request.files['video']
+    subtitle_file = request.files['subtitle']
+
+    # Save files temporarily if needed
+    video_path = os.path.join("uploads", video_file.filename)
+    subtitle_path = os.path.join("uploads", subtitle_file.filename)
+    video_file.save(video_path)
+    subtitle_file.save(subtitle_path)
+
+    # Process the video and subtitle with your model
+    process_video_and_subtitle(video_path, subtitle_path, OUTPUT_PATH)
+
+    # Return the new subtitle file to the frontend
+    return send_file(OUTPUT_PATH, as_attachment=True)
+
+def process_video_and_subtitle(video_path, subtitle_path, output_path):
+    with open(subtitle_path, 'r') as srt_file:
+        subtitles = srt_file.read()
+
+    new_subtitles = model.process(subtitles)
+
+    with open(output_path, 'w') as f:
+        f.write(new_subtitles)
 
 if __name__ == '__main__':
-    if not os.path.exists('output'):
-        os.makedirs('output')  # Create output directory if it doesn't exist
     app.run(debug=True)

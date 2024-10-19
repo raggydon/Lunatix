@@ -11,10 +11,12 @@ function App() {
 
 
   return (
-    <div className=' bg-zinc-900 w-full h-screen'>
-      <Navbar />
+    
+      
+        <Navbar/>
+      
 
-    </div>
+    
   )
 }
 export default App
